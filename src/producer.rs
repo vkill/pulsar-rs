@@ -9,11 +9,10 @@ use crate::client::SerializeMessage;
 use crate::connection::{Connection, SerialId};
 use crate::error::{ConnectionError, ProducerError};
 use crate::executor::Executor;
-use crate::message::proto::{
-    self, CommandSendReceipt, CompressionType, EncryptionKeys, Schema,
-};
+use crate::message::proto::{self, CommandSendReceipt, CompressionType, EncryptionKeys, Schema};
 use crate::message::BatchedMessage;
 use crate::{Error, Pulsar};
+use chrono::{Duration, Utc};
 use futures::task::{Context, Poll};
 use futures::Future;
 use tokio::macros::support::Pin;
@@ -57,6 +56,8 @@ pub struct Message {
     /// if this field is omitted, `publish_time` can be used for the purpose of `event_time`.
     pub event_time: ::std::option::Option<u64>,
     pub schema_version: ::std::option::Option<Vec<u8>>,
+    // Mark the message to be delivered at or after the specified timestamp
+    pub deliver_at_time: ::std::option::Option<i64>,
 }
 
 /// internal message type carrying options that must be defined
@@ -84,6 +85,8 @@ pub(crate) struct ProducerMessage {
     /// Additional parameters required by encryption
     pub encryption_param: ::std::option::Option<Vec<u8>>,
     pub schema_version: ::std::option::Option<Vec<u8>>,
+    // Mark the message to be delivered at or after the specified timestamp
+    pub deliver_at_time: ::std::option::Option<i64>,
 }
 
 impl From<Message> for ProducerMessage {
@@ -95,6 +98,7 @@ impl From<Message> for ProducerMessage {
             replicate_to: m.replicate_to,
             event_time: m.event_time,
             schema_version: m.schema_version,
+            deliver_at_time: m.deliver_at_time,
             ..Default::default()
         }
     }
@@ -917,6 +921,7 @@ pub struct MessageBuilder<'a, T, Exe: Executor> {
     properties: HashMap<String, String>,
     partition_key: Option<String>,
     content: T,
+    deliver_at_time: Option<i64>,
 }
 
 impl<'a, Exe: Executor> MessageBuilder<'a, (), Exe> {
@@ -926,6 +931,7 @@ impl<'a, Exe: Executor> MessageBuilder<'a, (), Exe> {
             properties: HashMap::new(),
             partition_key: None,
             content: (),
+            deliver_at_time: None,
         }
     }
 }
@@ -937,6 +943,7 @@ impl<'a, T, Exe: Executor> MessageBuilder<'a, T, Exe> {
             properties: self.properties,
             partition_key: self.partition_key,
             content,
+            deliver_at_time: self.deliver_at_time,
         }
     }
 
@@ -949,6 +956,11 @@ impl<'a, T, Exe: Executor> MessageBuilder<'a, T, Exe> {
         self.properties.insert(key.into(), value.into());
         self
     }
+
+    pub fn with_deliver_after(mut self, duration: Duration) -> Self {
+        self.deliver_at_time = Some((Utc::now() + duration).timestamp());
+        self
+    }
 }
 
 impl<'a, T: SerializeMessage + Sized, Exe: Executor> MessageBuilder<'a, T, Exe> {
@@ -958,11 +970,13 @@ impl<'a, T: SerializeMessage + Sized, Exe: Executor> MessageBuilder<'a, T, Exe> 
             properties,
             partition_key,
             content,
+            deliver_at_time,
         } = self;
 
         let mut message = T::serialize_message(content)?;
         message.properties = properties;
         message.partition_key = partition_key;
+        message.deliver_at_time = deliver_at_time;
         producer.send_raw(message.into()).await
     }
 }

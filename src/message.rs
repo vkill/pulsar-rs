@@ -603,6 +603,9 @@ pub mod proto {
         pub encryption_param: ::std::option::Option<Vec<u8>>,
         #[prost(bytes, optional, tag="16")]
         pub schema_version: ::std::option::Option<Vec<u8>>,
+        // Mark the message to be delivered at or after the specified timestamp
+        #[prost(int64, optional, tag="19")]
+        pub deliver_at_time: ::std::option::Option<i64>,
     }
     #[derive(Clone, PartialEq, Message)]
     pub struct SingleMessageMetadata {
